@@ -25,3 +25,6 @@ _testmain.go
 
 # Vim residuals
 *.sw[po]
+
+# Documentation
+*.pdf

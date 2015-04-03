@@ -1,0 +1,63 @@
+package raft
+
+import (
+	"time"
+	"transporter"
+)
+
+type raftCommandType int
+
+const (
+	appendEntriesType raftCommandType = iota
+	requestVoteType
+	replyType
+)
+
+type appendEntriesCmd struct {
+	commandType  raftCommandType
+	term         int
+	leaderId     string
+	prevLogIndex int
+	prevLogTerm  int
+
+	entries           []logEntry
+	leaderCommitIndex int
+}
+
+type requestVoteCmd struct {
+	commandType  raftCommandType
+	term         int
+	candidateId  string
+	lastLogIndex int
+	lastLogTerm  int
+}
+
+type replyCommand struct {
+	commandType raftCommandType
+	term        int
+	success     bool
+}
+
+type logEntry struct {
+	term    int
+	command []byte
+}
+
+type RaftNode struct {
+	MsgTransport  Transporter
+	CommitChannel chan []byte
+
+	serverId      string
+	currentLeader string
+
+	currentTerm int
+	votedFor    string
+	messageLog  []logEntry
+
+	commitIndex int
+	lastApplied int
+
+	nextIndex      map[string]int
+	matchIndex     map[string]int
+	currentTimeout <-chan Time
+}
