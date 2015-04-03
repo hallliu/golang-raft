@@ -13,6 +13,14 @@ const (
 	replyType
 )
 
+type serverRole int
+
+const (
+	clusterLeader serverRole = iota
+	leaderCandidate
+	clusterFollower
+)
+
 type appendEntriesCmd struct {
 	commandType  raftCommandType
 	term         int
@@ -46,9 +54,11 @@ type logEntry struct {
 type RaftNode struct {
 	MsgTransport  Transporter
 	CommitChannel chan []byte
+	hostnames     []string
 
 	serverId      string
 	currentLeader string
+	currentRole   serverRole
 
 	currentTerm int
 	votedFor    string
