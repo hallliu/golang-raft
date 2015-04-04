@@ -68,7 +68,6 @@ func (node *RaftNode) heartBeat() {
 		lastLogTerm := node.messageLog[prevLogIndex].term
 
 		heartBeatCommand := appendEntriesCmd{
-			commandType:       appendEntriesType,
 			term:              node.currentTerm,
 			leaderId:          node.serverId,
 			prevLogIndex:      prevLogIndex,
@@ -91,7 +90,6 @@ func (node *RaftNode) beginCandidacy() {
 	node.currentTerm += 1
 
 	reqVoteCmd := requestVoteCmd{
-		commandType:  requestVoteType,
 		term:         node.currentTerm,
 		candidateId:  node.serverId,
 		lastLogIndex: len(node.messageLog) - 1,
@@ -105,15 +103,131 @@ func (node *RaftNode) beginCandidacy() {
 }
 
 func sendMessage(source string, destinations []string, command interface{}, channel chan<- *transporter.Message) {
+	var cmdType raftCommandType
+	switch command.(type) {
+	case appendEntriesCmd:
+		cmdType = appendEntriesType
+	case requestVoteCmd:
+		cmdType = requestVoteType
+	case appendEntriesReply:
+		cmdType = appendEntriesReplyType
+	case requestVoteReply:
+		cmdType = requestVoteReplyType
+	default:
+		panic("Invalid command type")
+	}
+
 	cmdJson, _ := json.Marshal(command)
+	wrappedCommand := commandWrapper{cmdType, cmdJson}
+	wrappedJson, _ := json.Marshal(wrappedCommand)
+
 	for _, destination := range destinations {
 		cmdMessage := transporter.Message{
 			Destination: destination,
 			Source:      source,
-			Command:     cmdJson,
+			Command:     wrappedJson,
 		}
 		channel <- &cmdMessage
 	}
 }
 
-func (node *RaftNode) handleMessage(message *transporter.Message) {}
+func (node *RaftNode) handleMessage(message *transporter.Message) {
+	var wrappedCommand commandWrapper
+	json.Unmarshal(message.Command, wrappedCommand)
+	switch wrappedCommand.commandType {
+	case appendEntriesType:
+		var cmd appendEntriesCmd
+		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		node.handleAppendEntries(cmd, message.Source)
+	case requestVoteType:
+		var cmd requestVoteCmd
+		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		node.handleRequestVote(cmd)
+	case appendEntriesReplyType:
+		var cmd appendEntriesReply
+		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		node.handleAppendEntriesReply(cmd)
+	case requestVoteReplyType:
+		var cmd requestVoteReply
+		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		node.handleRequestVoteReply(cmd)
+	}
+}
+
+func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
+	if node.currentTerm <= cmd.term {
+		node.becomeFollower(cmd.term)
+	}
+
+	if node.currentTerm > cmd.term {
+		node.rejectAppendEntries(cmd, source)
+		return
+	}
+
+	node.currentLeader = source
+
+	// Own log too short
+	if len(node.messageLog) <= cmd.prevLogIndex {
+		node.rejectAppendEntries(cmd, source)
+		return
+	}
+
+	// Terms don't match up at prevLogIndex
+	supposedPreviousTerm := node.messageLog[cmd.prevLogIndex].term
+	if supposedPreviousTerm != cmd.prevLogTerm {
+		node.messageLog = node.messageLog[:cmd.prevLogIndex]
+		node.rejectAppendEntries(cmd, source)
+		return
+	}
+
+	newEntriesIndex := 0
+	for idx, entry := range node.messageLog[cmd.prevLogIndex+1:] {
+		newEntriesIndex = idx - (cmd.prevLogIndex + 1)
+		if newEntriesIndex >= len(cmd.entries) {
+			break
+		}
+		if entry.term != cmd.entries[newEntriesIndex].term {
+			node.messageLog = node.messageLog[:idx]
+			break
+		}
+	}
+
+	node.messageLog = append(node.messageLog, cmd.entries[newEntriesIndex:]...)
+
+	if cmd.leaderCommitIndex > node.commitIndex {
+		var newCommitIndex int
+		if cmd.leaderCommitIndex < len(node.messageLog)-1 {
+			newCommitIndex = cmd.leaderCommitIndex
+		} else {
+			newCommitIndex = len(node.messageLog) - 1
+		}
+		for _, entry := range node.messageLog[node.commitIndex+1 : newCommitIndex+1] {
+			node.CommitChannel <- entry.command
+		}
+		node.commitIndex = newCommitIndex
+	}
+}
+
+func (node *RaftNode) handleRequestVote(cmd requestVoteCmd)            {}
+func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply) {}
+func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply)     {}
+
+// becomeFollower reverts the server back to a follower state.
+// It is called when an AppendEntries message with a higher term than one's own is received.
+func (node *RaftNode) becomeFollower(term int) {
+	node.currentRole = clusterFollower
+	if term > node.currentTerm {
+		node.votedFor = ""
+	}
+	node.currentTerm = term
+	node.currentTimeout = time.After(getElectionTimeout())
+}
+
+func (node *RaftNode) rejectAppendEntries(origCommand appendEntriesCmd, origSender string) {
+	rejection := appendEntriesReply{
+		originalMessage: origCommand,
+		term:            node.currentTerm,
+		success:         false,
+	}
+	sendMessage(node.serverId, []string{origSender}, rejection, node.MsgTransport.Send)
+}

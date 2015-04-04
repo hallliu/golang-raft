@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+// Constant definitions for the server's role (leader, candidate, or follower)
+type serverRole int
+
+const (
+	clusterLeader serverRole = iota
+	leaderCandidate
+	clusterFollower
+)
+
+// Constant definitions and struct definitions for the various messages that get sent around.
 type raftCommandType int
 
 const (
@@ -14,16 +24,12 @@ const (
 	requestVoteReplyType
 )
 
-type serverRole int
-
-const (
-	clusterLeader serverRole = iota
-	leaderCandidate
-	clusterFollower
-)
+type commandWrapper struct {
+	commandType raftCommandType
+	commandJson []byte
+}
 
 type appendEntriesCmd struct {
-	commandType  raftCommandType
 	term         int
 	leaderId     string
 	prevLogIndex int
@@ -34,19 +40,24 @@ type appendEntriesCmd struct {
 }
 
 type requestVoteCmd struct {
-	commandType  raftCommandType
 	term         int
 	candidateId  string
 	lastLogIndex int
 	lastLogTerm  int
 }
 
-type replyCommand struct {
-	commandType raftCommandType
-	term        int
-	success     bool
+type appendEntriesReply struct {
+	originalMessage appendEntriesCmd
+	term            int
+	success         bool
 }
 
+type requestVoteReply struct {
+	term        int
+	voteGranted bool
+}
+
+// The data that makes up the state of a single Raft node
 type logEntry struct {
 	term    int
 	command []byte
