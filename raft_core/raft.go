@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-var _ = transporter.MakeChannelTransporters // Remove after use is found
-
 func getElectionTimeout() time.Duration {
 	timeoutOffset := rand.Int63n(200)
 	return time.Duration(150+timeoutOffset) * time.Millisecond
