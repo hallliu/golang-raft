@@ -79,6 +79,7 @@ func (node *RaftNode) heartBeat() {
 
 		sendMessage(node.serverId, []string{hostname}, heartBeatCommand, node.MsgTransport.Send)
 	}
+	node.currentTimeout = time.After(20 * time.Millisecond)
 }
 
 // beginCandidacy runs when the election timeout expires.
@@ -100,6 +101,7 @@ func (node *RaftNode) beginCandidacy() {
 
 	node.votedFor = node.serverId
 	node.numVotes = 1
+	node.currentTimeout = time.After(getElectionTimeout())
 }
 
 func sendMessage(source string, destinations []string, command interface{}, channel chan<- *transporter.Message) {
