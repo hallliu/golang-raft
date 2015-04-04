@@ -10,7 +10,8 @@ type raftCommandType int
 const (
 	appendEntriesType raftCommandType = iota
 	requestVoteType
-	replyType
+	appendEntriesReplyType
+	requestVoteReplyType
 )
 
 type serverRole int
@@ -54,7 +55,7 @@ type logEntry struct {
 type RaftNode struct {
 	MsgTransport  transporter.Transporter
 	CommitChannel chan []byte
-	hostnames     []string
+	peernames     []string
 
 	serverId      string
 	currentLeader string
@@ -67,7 +68,9 @@ type RaftNode struct {
 	commitIndex int
 	lastApplied int
 
-	nextIndex      map[string]int
-	matchIndex     map[string]int
+	nextIndex  map[string]int
+	matchIndex map[string]int
+
+	numVotes       int
 	currentTimeout <-chan time.Time
 }
