@@ -1,4 +1,4 @@
-package raft
+package raft_core
 
 import (
 	"math/rand"
