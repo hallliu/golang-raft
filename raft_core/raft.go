@@ -2,23 +2,26 @@ package raft_core
 
 import (
 	"math/rand"
+	"raft/transporter"
 	"time"
-	"transporter"
 )
+
+var _ = transporter.MakeChannelTransporters // Remove after use is found
 
 func getElectionTimeout() time.Duration {
 	timeoutOffset := rand.Int63n(200)
-	return (150 + timeoutOffset) * time.Millisecond
+	return time.Duration(150+timeoutOffset) * time.Millisecond
 }
 
-func MakeRaftNode(hostname string, hostnames []string, ownTransport Transporter, commitChannel chan []byte) (result *RaftNode) {
-	resultNode := &RaftNode{
+func MakeRaftNode(hostname string, hostnames []string, ownTransport transporter.Transporter, commitChannel chan []byte) (result *RaftNode) {
+	result = &RaftNode{
 		MsgTransport:  ownTransport,
 		CommitChannel: commitChannel,
 		hostnames:     hostnames,
 		serverId:      hostname,
 		currentRole:   clusterFollower,
 	}
+	return
 }
 
 /*
@@ -29,10 +32,13 @@ func (node *RaftNode) run() {
 	node.currentTimeout = time.After(getElectionTimeout())
 	for {
 		select {
-		case timedOut := <-node.currentTimeout:
+		case <-node.currentTimeout:
 			node.handleTimeout()
 		case message := <-node.MsgTransport.Recv:
 			node.handleMessage(message)
 		}
 	}
 }
+
+func (node *RaftNode) handleTimeout()                             {}
+func (node *RaftNode) handleMessage(message *transporter.Message) {}

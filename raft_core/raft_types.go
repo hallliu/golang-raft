@@ -1,8 +1,8 @@
 package raft_core
 
 import (
+	"raft/transporter"
 	"time"
-	"transporter"
 )
 
 type raftCommandType int
@@ -52,7 +52,7 @@ type logEntry struct {
 }
 
 type RaftNode struct {
-	MsgTransport  Transporter
+	MsgTransport  transporter.Transporter
 	CommitChannel chan []byte
 	hostnames     []string
 
@@ -69,5 +69,5 @@ type RaftNode struct {
 
 	nextIndex      map[string]int
 	matchIndex     map[string]int
-	currentTimeout <-chan Time
+	currentTimeout <-chan time.Time
 }
