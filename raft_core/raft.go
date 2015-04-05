@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"raft/transporter"
+	"sort"
 	"time"
 )
 
@@ -144,7 +145,7 @@ func (node *RaftNode) handleMessage(message *transporter.Message) {
 	case appendEntriesReplyType:
 		var cmd appendEntriesReply
 		json.Unmarshal(wrappedCommand.commandJson, cmd)
-		node.handleAppendEntriesReply(cmd)
+		node.handleAppendEntriesReply(cmd, message.Source)
 	case requestVoteReplyType:
 		var cmd requestVoteReply
 		json.Unmarshal(wrappedCommand.commandJson, cmd)
@@ -158,7 +159,7 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 	}
 
 	if node.currentTerm > cmd.term {
-		node.rejectAppendEntries(cmd, source)
+		node.replyAppendEntries(cmd, source, false)
 		return
 	}
 
@@ -166,7 +167,7 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 
 	// Own log too short
 	if len(node.messageLog) <= cmd.prevLogIndex {
-		node.rejectAppendEntries(cmd, source)
+		node.replyAppendEntries(cmd, source, false)
 		return
 	}
 
@@ -174,7 +175,7 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 	supposedPreviousTerm := node.messageLog[cmd.prevLogIndex].term
 	if supposedPreviousTerm != cmd.prevLogTerm {
 		node.messageLog = node.messageLog[:cmd.prevLogIndex]
-		node.rejectAppendEntries(cmd, source)
+		node.replyAppendEntries(cmd, source, false)
 		return
 	}
 
@@ -204,11 +205,83 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 		}
 		node.commitIndex = newCommitIndex
 	}
+
+	node.replyAppendEntries(cmd, source, true)
+	return
 }
 
-func (node *RaftNode) handleRequestVote(cmd requestVoteCmd)            {}
-func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply) {}
-func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply)     {}
+func (node *RaftNode) handleRequestVote(cmd requestVoteCmd) {
+	if cmd.term < node.currentTerm {
+		node.replyRequestVote(cmd.candidateId, false)
+	}
+
+	// Reset the timeout because at this point, this node knows that there is a viable candidate.
+	node.currentTimeout = time.After(getElectionTimeout())
+
+	if cmd.term > node.currentTerm {
+		node.becomeFollower(cmd.term)
+	}
+
+	hasNotVoted := (node.votedFor == "")
+	candidateTermUpToDate := node.messageLog[len(node.messageLog)-1].term <= cmd.lastLogTerm
+	candidateIndexUpToDate := len(node.messageLog)-1 <= cmd.lastLogIndex
+
+	if hasNotVoted && candidateTermUpToDate && candidateIndexUpToDate {
+		node.replyRequestVote(cmd.candidateId, true)
+		node.votedFor = cmd.candidateId
+	} else {
+		node.replyRequestVote(cmd.candidateId, false)
+	}
+	return
+}
+
+func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source string) {
+	if cmd.term > node.currentTerm {
+		node.becomeFollower(cmd.term)
+	}
+
+	// Drop the message if it got delayed from earlier and this node is no longer a leader.
+	if node.currentRole != clusterLeader {
+		return
+	}
+
+	if !cmd.success {
+		node.nextIndex[source] -= 1
+		retryAppendEntry := appendEntriesCmd{
+			term:              node.currentTerm,
+			leaderId:          node.serverId,
+			prevLogIndex:      node.nextIndex[source] - 1,
+			prevLogTerm:       node.messageLog[node.nextIndex[source]-1].term,
+			entries:           node.messageLog[node.nextIndex[source]:],
+			leaderCommitIndex: node.commitIndex,
+		}
+		sendMessage(node.serverId, []string{source}, retryAppendEntry, node.MsgTransport.Send)
+		return
+	}
+
+	if node.matchIndex[source] < cmd.originalMessage.prevLogIndex+len(cmd.originalMessage.entries) {
+		node.matchIndex[source] = cmd.originalMessage.prevLogIndex + len(cmd.originalMessage.entries)
+	}
+	node.nextIndex[source] = node.matchIndex[source] + 1
+
+	// Check if there's anything that can be committed
+	matchedIndices := make([]int, 0, len(node.matchIndex))
+	for _, matchIdx := range node.matchIndex {
+		matchedIndices = append(matchedIndices, matchIdx)
+	}
+	sort.Ints(matchedIndices)
+	tentativeCommitIndex := matchedIndices[len(node.peernames)/2]
+	if tentativeCommitIndex > node.commitIndex {
+		if node.messageLog[tentativeCommitIndex].term == node.currentTerm {
+			for _, entry := range node.messageLog[node.commitIndex+1 : tentativeCommitIndex+1] {
+				node.CommitChannel <- entry.command
+			}
+			node.commitIndex = tentativeCommitIndex
+		}
+	}
+	return
+}
+func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply) {}
 
 // becomeFollower reverts the server back to a follower state.
 // It is called when an AppendEntries message with a higher term than one's own is received.
@@ -221,11 +294,20 @@ func (node *RaftNode) becomeFollower(term int) {
 	node.currentTimeout = time.After(getElectionTimeout())
 }
 
-func (node *RaftNode) rejectAppendEntries(origCommand appendEntriesCmd, origSender string) {
-	rejection := appendEntriesReply{
+func (node *RaftNode) replyAppendEntries(origCommand appendEntriesCmd, origSender string, success bool) {
+	reply := appendEntriesReply{
 		originalMessage: origCommand,
 		term:            node.currentTerm,
-		success:         false,
+		success:         success,
 	}
-	sendMessage(node.serverId, []string{origSender}, rejection, node.MsgTransport.Send)
+	sendMessage(node.serverId, []string{origSender}, reply, node.MsgTransport.Send)
+}
+
+func (node *RaftNode) replyRequestVote(origSender string, voteGranted bool) {
+	reply := requestVoteReply{
+		term:        node.currentTerm,
+		voteGranted: voteGranted,
+	}
+
+	sendMessage(node.serverId, []string{origSender}, reply, node.MsgTransport.Send)
 }
