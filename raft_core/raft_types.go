@@ -1,7 +1,7 @@
 package raft_core
 
 import (
-	"raft/transporter"
+	"github.com/hallliu/golang-raft/transporter"
 	"time"
 )
 

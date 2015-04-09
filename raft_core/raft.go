@@ -3,7 +3,7 @@ package raft_core
 import (
 	"encoding/json"
 	"math/rand"
-	"raft/transporter"
+	"github.com/hallliu/golang-raft/transporter"
 	"sort"
 	"time"
 )
