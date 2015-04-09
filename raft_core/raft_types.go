@@ -14,6 +14,19 @@ const (
 	clusterFollower
 )
 
+func (r serverRole) String() string {
+	switch r {
+	case clusterLeader:
+		return "Leader"
+	case leaderCandidate:
+		return "Candidate"
+	case clusterFollower:
+		return "Follower"
+	default:
+		return "undefined"
+	}
+}
+
 // Constant definitions and struct definitions for the various messages that get sent around.
 type raftCommandType int
 
