@@ -281,7 +281,43 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 	}
 	return
 }
-func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply) {}
+func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply) {
+	if cmd.term > node.currentTerm {
+		node.becomeFollower(cmd.term)
+		return
+	}
+
+	if cmd.term < node.currentTerm || !(node.currentRole != leaderCandidate) {
+		return
+	}
+
+	if cmd.voteGranted {
+		node.numVotes += 1
+		if node.numVotes >= len(node.peernames)/2 {
+			node.becomeLeader()
+		}
+	}
+	return
+}
+
+func (node *RaftNode) becomeLeader() {
+	node.currentTimeout = nil
+	node.currentRole = clusterLeader
+
+	node.nextIndex = make(map[string]int)
+	for _, peerName := range node.peernames {
+		node.nextIndex[peerName] = len(node.messageLog)
+	}
+
+	node.matchIndex = make(map[string]int)
+	for _, peerName := range node.peernames {
+		node.matchIndex[peerName] = 0
+	}
+
+	node.currentLeader = node.serverId
+	node.messageLog = append(node.messageLog, logEntry{term: node.currentTerm, command: []byte{}})
+	node.heartBeat()
+}
 
 // becomeFollower reverts the server back to a follower state.
 // It is called when an AppendEntries message with a higher term than one's own is received.
