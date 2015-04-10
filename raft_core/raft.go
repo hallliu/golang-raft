@@ -2,8 +2,11 @@ package raft_core
 
 import (
 	"github.com/hallliu/golang-raft/transporter"
+	"github.com/op/go-logging"
 	"time"
 )
+
+func setUp(loggingLevel logging.Level) {}
 
 func MakeRaftNode(hostname string, hostnames []string, ownTransport transporter.Transporter, commitChannel chan []byte) (result *RaftNode) {
 	peerNames := make([]string, len(hostnames)-1, len(hostnames)-1)

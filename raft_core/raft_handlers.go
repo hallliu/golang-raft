@@ -11,8 +11,7 @@ import (
 )
 
 func (node *RaftNode) handleTimeout() {
-	fmt.Printf("Node %s timed out at term %d. Current status is %s", node.serverId, node.currentTerm, node.currentRole)
-
+	fmt.Printf("Node %s timed out at term %d. Current status is %s\n", node.serverId, node.currentTerm, node.currentRole)
 	switch {
 	case node.currentRole == clusterFollower:
 		node.beginCandidacy()
@@ -24,12 +23,24 @@ func (node *RaftNode) handleTimeout() {
 }
 
 func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
+	fmt.Printf("Node %s received appendEntries: %+v\n", cmd)
 
 	if node.currentTerm <= cmd.term {
+		fmt.Printf(
+			"Node reverting to follower because own term is %d and rcvd term is %d",
+			node.currentTerm,
+			cmd.term,
+		)
+
 		node.becomeFollower(cmd.term)
 	}
 
 	if node.currentTerm > cmd.term {
+		fmt.Printf(
+			"Node rejecting appendEntries because own term is %d and rcvd term is %d",
+			node.currentTerm,
+			cmd.term,
+		)
 		node.replyAppendEntries(cmd, source, false)
 		return
 	}
@@ -38,6 +49,11 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 
 	// Own log too short
 	if len(node.messageLog) <= cmd.prevLogIndex {
+		fmt.Printf(
+			"Node rejecting appendEntries because own log has %d entries and cmd expects %d",
+			len(node.messageLog),
+			cmd.prevLogIndex,
+		)
 		node.replyAppendEntries(cmd, source, false)
 		return
 	}
