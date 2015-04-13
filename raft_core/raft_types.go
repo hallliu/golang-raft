@@ -2,6 +2,7 @@ package raft_core
 
 import (
 	"github.com/hallliu/golang-raft/transporter"
+	"github.com/op/go-logging"
 	"time"
 )
 
@@ -97,4 +98,5 @@ type RaftNode struct {
 
 	numVotes       int
 	currentTimeout <-chan time.Time
+	logger         *logging.Logger
 }

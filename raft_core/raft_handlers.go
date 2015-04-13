@@ -11,7 +11,7 @@ import (
 )
 
 func (node *RaftNode) handleTimeout() {
-	fmt.Printf("Node %s timed out at term %d. Current status is %s\n", node.serverId, node.currentTerm, node.currentRole)
+	node.debugLog("Timed out at term %d. Current status is %s\n", node.serverId, node.currentTerm, node.currentRole)
 	switch {
 	case node.currentRole == clusterFollower:
 		node.beginCandidacy()
@@ -23,11 +23,11 @@ func (node *RaftNode) handleTimeout() {
 }
 
 func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
-	fmt.Printf("Node %s received appendEntries: %+v\n", cmd)
+	node.debugLog("Received appendEntries: %+v\n", cmd)
 
 	if node.currentTerm <= cmd.term {
-		fmt.Printf(
-			"Node reverting to follower because own term is %d and rcvd term is %d",
+		node.debugLog(
+			"Reverting to follower because own term is %d and rcvd term is %d",
 			node.currentTerm,
 			cmd.term,
 		)
@@ -36,8 +36,8 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 	}
 
 	if node.currentTerm > cmd.term {
-		fmt.Printf(
-			"Node rejecting appendEntries because own term is %d and rcvd term is %d",
+		node.debugLog(
+			"Rejecting appendEntries because own term is %d and rcvd term is %d",
 			node.currentTerm,
 			cmd.term,
 		)
@@ -49,8 +49,8 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 
 	// Own log too short
 	if len(node.messageLog) <= cmd.prevLogIndex {
-		fmt.Printf(
-			"Node rejecting appendEntries because own log has %d entries and cmd expects %d",
+		node.debugLog(
+			"Rejecting appendEntries because own log has %d entries and cmd expects %d",
 			len(node.messageLog),
 			cmd.prevLogIndex,
 		)
@@ -61,6 +61,13 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 	// Terms don't match up at prevLogIndex
 	supposedPreviousTerm := node.messageLog[cmd.prevLogIndex].term
 	if supposedPreviousTerm != cmd.prevLogTerm {
+		node.debugLog(
+			"Rejecting appendEntries because rcvd term at position %d is %d"+
+				"and own term at same position is %d",
+			cmd.prevLogIndex,
+			cmd.prevLogTerm,
+			supposedPreviousTerm,
+		)
 		node.messageLog = node.messageLog[:cmd.prevLogIndex]
 		node.replyAppendEntries(cmd, source, false)
 		return
@@ -70,14 +77,21 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 	for idx, entry := range node.messageLog[cmd.prevLogIndex+1:] {
 		newEntriesIndex = idx - (cmd.prevLogIndex + 1)
 		if newEntriesIndex >= len(cmd.entries) {
+			node.debugLog("Reached end of received entries without finding anything new")
 			break
 		}
 		if entry.term != cmd.entries[newEntriesIndex].term {
+			node.debugLog(
+				"Term mismatch at index %d of own log and %d of rcvd entries. Overwriting our own.",
+				idx,
+				newEntriesIndex,
+			)
 			node.messageLog = node.messageLog[:idx]
 			break
 		}
 	}
 
+	node.debugLog("About to append %d entries to own log", len(cmd.entries)-newEntriesIndex)
 	node.messageLog = append(node.messageLog, cmd.entries[newEntriesIndex:]...)
 
 	if cmd.leaderCommitIndex > node.commitIndex {
@@ -87,7 +101,8 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 		} else {
 			newCommitIndex = len(node.messageLog) - 1
 		}
-		for _, entry := range node.messageLog[node.commitIndex+1 : newCommitIndex+1] {
+		for idx, entry := range node.messageLog[node.commitIndex+1 : newCommitIndex+1] {
+			node.debugLog("Committing command %s at index %d", idx, entry.command)
 			node.CommitChannel <- entry.command
 		}
 		node.commitIndex = newCommitIndex
@@ -298,4 +313,8 @@ func (node *RaftNode) replyRequestVote(origSender string, voteGranted bool) {
 	}
 
 	sendMessage(node.serverId, []string{origSender}, reply, node.MsgTransport.Send)
+}
+
+func (node *RaftNode) debugLog(format string, args ...interface{}) {
+	node.logger.Debug("Node %s: "+format, node.serverId, args...)
 }
