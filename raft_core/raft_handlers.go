@@ -113,7 +113,9 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 }
 
 func (node *RaftNode) handleRequestVote(cmd requestVoteCmd) {
+	node.debugLog("Received requestVote: %+v\n", cmd)
 	if cmd.term < node.currentTerm {
+		node.debugLog("requestVote denied: own term is %d, rcvd term is %d", node.currentTerm, cmd.term)
 		node.replyRequestVote(cmd.candidateId, false)
 	}
 
@@ -121,6 +123,7 @@ func (node *RaftNode) handleRequestVote(cmd requestVoteCmd) {
 	node.currentTimeout = time.After(getElectionTimeout())
 
 	if cmd.term > node.currentTerm {
+		node.debugLog("Becoming follower because received term %d and own term is %d", cmd.term, node.currentTerm)
 		node.becomeFollower(cmd.term)
 	}
 
@@ -129,25 +132,48 @@ func (node *RaftNode) handleRequestVote(cmd requestVoteCmd) {
 	candidateIndexUpToDate := len(node.messageLog)-1 <= cmd.lastLogIndex
 
 	if hasNotVoted && candidateTermUpToDate && candidateIndexUpToDate {
+		node.debugLog("Voting for %s for term %d", cmd.candidateId, cmd.term)
 		node.replyRequestVote(cmd.candidateId, true)
 		node.votedFor = cmd.candidateId
 	} else {
+		node.debugLog("Rejecting requestVote because...")
+		if !hasNotVoted {
+			node.debugLog("Already voted for %s", node.votedFor)
+		}
+		if !candidateTermUpToDate {
+			node.debugLog("Candidate's last log term is %d, but our own is %d",
+				cmd.lastLogTerm,
+				node.messageLog[len(node.messageLog)-1].term,
+			)
+		}
+		if !candidateIndexUpToDate {
+			node.debugLog("Candidate's last log index is %d, but our log's last index is %d", cmd.lastLogIndex, len(node.messageLog)-1)
+		}
+
 		node.replyRequestVote(cmd.candidateId, false)
 	}
 	return
 }
 
 func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source string) {
+	node.debugLog("Got appendEntries reply %+v from %s", cmd, source)
+
 	if cmd.term > node.currentTerm {
+		node.debugLog("Reverting to follower because received message with term %d and our own term is %d",
+			cmd.term,
+			node.currentTerm,
+		)
 		node.becomeFollower(cmd.term)
 	}
 
 	// Drop the message if it got delayed from earlier and this node is no longer a leader.
 	if node.currentRole != clusterLeader {
+		node.debugLog("Finished handling this appendEntries reply because we're no longer a leader")
 		return
 	}
 
 	if !cmd.success {
+		node.debugLog("Received rejected appendEntries. Resending")
 		node.nextIndex[source] -= 1
 		retryAppendEntry := appendEntriesCmd{
 			term:              node.currentTerm,
@@ -163,6 +189,7 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 
 	if node.matchIndex[source] < cmd.originalMessage.prevLogIndex+len(cmd.originalMessage.entries) {
 		node.matchIndex[source] = cmd.originalMessage.prevLogIndex + len(cmd.originalMessage.entries)
+		node.debugLog("Node %s's match index increased to %d", node.matchIndex[source])
 	}
 	node.nextIndex[source] = node.matchIndex[source] + 1
 
@@ -174,6 +201,7 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 	sort.Ints(matchedIndices)
 	tentativeCommitIndex := matchedIndices[len(node.peernames)/2]
 	if tentativeCommitIndex > node.commitIndex {
+		node.debugLog("About to commit %d entries", tentativeCommitIndex-node.commitIndex)
 		if node.messageLog[tentativeCommitIndex].term == node.currentTerm {
 			for _, entry := range node.messageLog[node.commitIndex+1 : tentativeCommitIndex+1] {
 				node.CommitChannel <- entry.command
@@ -183,19 +211,27 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 	}
 	return
 }
-func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply) {
+func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply, source string) {
+	node.debugLog("Got reply of requestVote: %+v from %s.", cmd, source)
 	if cmd.term > node.currentTerm {
+		node.debugLog("Reverting to follower because received message with term %d and our own term is %d",
+			cmd.term,
+			node.currentTerm,
+		)
 		node.becomeFollower(cmd.term)
 		return
 	}
 
 	if cmd.term < node.currentTerm || !(node.currentRole != leaderCandidate) {
+		node.debugLog("Ignoring reply because term is out of date (%d) or we are no longer a candidate", cmd.term)
 		return
 	}
 
 	if cmd.voteGranted {
 		node.numVotes += 1
+		node.debugLog("Vote received. Now have %d votes out of %d necessary", node.numVotes, len(node.peernames)/2)
 		if node.numVotes >= len(node.peernames)/2 {
+			node.debugLog("Got enough votes. Becoming leader at term %d", node.currentTerm)
 			node.becomeLeader()
 		}
 	}
@@ -282,7 +318,7 @@ func (node *RaftNode) handleMessage(message *transporter.Message) {
 	case requestVoteReplyType:
 		var cmd requestVoteReply
 		json.Unmarshal(wrappedCommand.commandJson, cmd)
-		node.handleRequestVoteReply(cmd)
+		node.handleRequestVoteReply(cmd, message.Source)
 	}
 }
 
