@@ -7,7 +7,7 @@ import (
 )
 
 func MakeRaftNode(hostname string, hostnames []string, ownTransport transporter.Transporter, commitChannel chan []byte) (result *RaftNode) {
-	peerNames := make([]string, len(hostnames)-1, len(hostnames)-1)
+	peerNames := make([]string, 0, len(hostnames)-1)
 	for _, name := range hostnames {
 		if name != hostname {
 			peerNames = append(peerNames, name)
@@ -35,6 +35,9 @@ func (node *RaftNode) run() {
 	for {
 		select {
 		case <-node.currentTimeout:
+			if node.noTimeout {
+				continue
+			}
 			node.handleTimeout()
 		case message := <-node.MsgTransport.Recv:
 			node.handleMessage(message)

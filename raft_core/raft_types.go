@@ -98,5 +98,8 @@ type RaftNode struct {
 
 	numVotes       int
 	currentTimeout <-chan time.Time
-	logger         *logging.Logger
+
+	// Debug data only from here below
+	logger    *logging.Logger
+	noTimeout bool
 }
