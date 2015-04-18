@@ -5,10 +5,13 @@ package raft_core
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/hallliu/golang-raft/transporter"
 	"math/rand"
 	"time"
 )
+
+var _ = fmt.Errorf
 
 func getElectionTimeout() time.Duration {
 	timeoutOffset := rand.Int63n(200)

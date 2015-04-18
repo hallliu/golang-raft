@@ -39,42 +39,42 @@ const (
 )
 
 type commandWrapper struct {
-	commandType raftCommandType
-	commandJson []byte
+	CommandType raftCommandType
+	CommandJson []byte
 }
 
 type appendEntriesCmd struct {
-	term         int
-	leaderId     string
-	prevLogIndex int
-	prevLogTerm  int
+	Term         int
+	LeaderId     string
+	PrevLogIndex int
+	PrevLogTerm  int
 
-	entries           []logEntry
-	leaderCommitIndex int
+	Entries           []logEntry
+	LeaderCommitIndex int
 }
 
 type requestVoteCmd struct {
-	term         int
-	candidateId  string
-	lastLogIndex int
-	lastLogTerm  int
+	Term         int
+	CandidateId  string
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 type appendEntriesReply struct {
-	originalMessage appendEntriesCmd
-	term            int
-	success         bool
+	OriginalMessage appendEntriesCmd
+	Term            int
+	Success         bool
 }
 
 type requestVoteReply struct {
-	term        int
-	voteGranted bool
+	Term        int
+	VoteGranted bool
 }
 
 // The data that makes up the state of a single Raft node
 type logEntry struct {
-	term    int
-	command []byte
+	Term    int
+	Command []byte
 }
 
 type RaftNode struct {

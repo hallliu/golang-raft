@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var _ = fmt.Errorf
+
 func (node *RaftNode) handleTimeout() {
 	node.debugLog("Timed out at term %d. Current status is %s\n", node.serverId, node.currentTerm, node.currentRole)
 	switch {
@@ -25,21 +27,21 @@ func (node *RaftNode) handleTimeout() {
 func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 	node.debugLog("Received appendEntries: %+v\n", cmd)
 
-	if node.currentTerm <= cmd.term {
+	if node.currentTerm <= cmd.Term {
 		node.debugLog(
 			"Reverting to follower because own term is %d and rcvd term is %d",
 			node.currentTerm,
-			cmd.term,
+			cmd.Term,
 		)
 
-		node.becomeFollower(cmd.term)
+		node.becomeFollower(cmd.Term)
 	}
 
-	if node.currentTerm > cmd.term {
+	if node.currentTerm > cmd.Term {
 		node.debugLog(
 			"Rejecting appendEntries because own term is %d and rcvd term is %d",
 			node.currentTerm,
-			cmd.term,
+			cmd.Term,
 		)
 		node.replyAppendEntries(cmd, source, false)
 		return
@@ -48,39 +50,39 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 	node.currentLeader = source
 
 	// Own log too short
-	if len(node.messageLog) <= cmd.prevLogIndex {
+	if len(node.messageLog) <= cmd.PrevLogIndex {
 		node.debugLog(
 			"Rejecting appendEntries because own log has %d entries and cmd expects %d",
 			len(node.messageLog),
-			cmd.prevLogIndex,
+			cmd.PrevLogIndex,
 		)
 		node.replyAppendEntries(cmd, source, false)
 		return
 	}
 
 	// Terms don't match up at prevLogIndex
-	supposedPreviousTerm := node.messageLog[cmd.prevLogIndex].term
-	if supposedPreviousTerm != cmd.prevLogTerm {
+	supposedPreviousTerm := node.messageLog[cmd.PrevLogIndex].Term
+	if supposedPreviousTerm != cmd.PrevLogTerm {
 		node.debugLog(
 			"Rejecting appendEntries because rcvd term at position %d is %d"+
 				"and own term at same position is %d",
-			cmd.prevLogIndex,
-			cmd.prevLogTerm,
+			cmd.PrevLogIndex,
+			cmd.PrevLogTerm,
 			supposedPreviousTerm,
 		)
-		node.messageLog = node.messageLog[:cmd.prevLogIndex]
+		node.messageLog = node.messageLog[:cmd.PrevLogIndex]
 		node.replyAppendEntries(cmd, source, false)
 		return
 	}
 
 	newEntriesIndex := 0
-	for idx, entry := range node.messageLog[cmd.prevLogIndex+1:] {
-		newEntriesIndex = idx - (cmd.prevLogIndex + 1)
-		if newEntriesIndex >= len(cmd.entries) {
+	for idx, entry := range node.messageLog[cmd.PrevLogIndex+1:] {
+		newEntriesIndex = idx - (cmd.PrevLogIndex + 1)
+		if newEntriesIndex >= len(cmd.Entries) {
 			node.debugLog("Reached end of received entries without finding anything new")
 			break
 		}
-		if entry.term != cmd.entries[newEntriesIndex].term {
+		if entry.Term != cmd.Entries[newEntriesIndex].Term {
 			node.debugLog(
 				"Term mismatch at index %d of own log and %d of rcvd entries. Overwriting our own.",
 				idx,
@@ -91,19 +93,19 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 		}
 	}
 
-	node.debugLog("About to append %d entries to own log", len(cmd.entries)-newEntriesIndex)
-	node.messageLog = append(node.messageLog, cmd.entries[newEntriesIndex:]...)
+	node.debugLog("About to append %d entries to own log", len(cmd.Entries)-newEntriesIndex)
+	node.messageLog = append(node.messageLog, cmd.Entries[newEntriesIndex:]...)
 
-	if cmd.leaderCommitIndex > node.commitIndex {
+	if cmd.LeaderCommitIndex > node.commitIndex {
 		var newCommitIndex int
-		if cmd.leaderCommitIndex < len(node.messageLog)-1 {
-			newCommitIndex = cmd.leaderCommitIndex
+		if cmd.LeaderCommitIndex < len(node.messageLog)-1 {
+			newCommitIndex = cmd.LeaderCommitIndex
 		} else {
 			newCommitIndex = len(node.messageLog) - 1
 		}
 		for idx, entry := range node.messageLog[node.commitIndex+1 : newCommitIndex+1] {
-			node.debugLog("Committing command %s at index %d", idx, entry.command)
-			node.CommitChannel <- entry.command
+			node.debugLog("Committing command %s at index %d", idx, entry.Command)
+			node.CommitChannel <- entry.Command
 		}
 		node.commitIndex = newCommitIndex
 	}
@@ -114,27 +116,27 @@ func (node *RaftNode) handleAppendEntries(cmd appendEntriesCmd, source string) {
 
 func (node *RaftNode) handleRequestVote(cmd requestVoteCmd) {
 	node.debugLog("Received requestVote: %+v\n", cmd)
-	if cmd.term < node.currentTerm {
-		node.debugLog("requestVote denied: own term is %d, rcvd term is %d", node.currentTerm, cmd.term)
-		node.replyRequestVote(cmd.candidateId, false)
+	if cmd.Term < node.currentTerm {
+		node.debugLog("requestVote denied: own term is %d, rcvd term is %d", node.currentTerm, cmd.Term)
+		node.replyRequestVote(cmd.CandidateId, false)
 	}
 
 	// Reset the timeout because at this point, this node knows that there is a viable candidate.
 	node.currentTimeout = time.After(getElectionTimeout())
 
-	if cmd.term > node.currentTerm {
-		node.debugLog("Becoming follower because received term %d and own term is %d", cmd.term, node.currentTerm)
-		node.becomeFollower(cmd.term)
+	if cmd.Term > node.currentTerm {
+		node.debugLog("Becoming follower because received term %d and own term is %d", cmd.Term, node.currentTerm)
+		node.becomeFollower(cmd.Term)
 	}
 
 	hasNotVoted := (node.votedFor == "")
-	candidateTermUpToDate := node.messageLog[len(node.messageLog)-1].term <= cmd.lastLogTerm
-	candidateIndexUpToDate := len(node.messageLog)-1 <= cmd.lastLogIndex
+	candidateTermUpToDate := node.messageLog[len(node.messageLog)-1].Term <= cmd.LastLogTerm
+	candidateIndexUpToDate := len(node.messageLog)-1 <= cmd.LastLogIndex
 
 	if hasNotVoted && candidateTermUpToDate && candidateIndexUpToDate {
-		node.debugLog("Voting for %s for term %d", cmd.candidateId, cmd.term)
-		node.replyRequestVote(cmd.candidateId, true)
-		node.votedFor = cmd.candidateId
+		node.debugLog("Voting for %s for term %d", cmd.CandidateId, cmd.Term)
+		node.replyRequestVote(cmd.CandidateId, true)
+		node.votedFor = cmd.CandidateId
 	} else {
 		node.debugLog("Rejecting requestVote because...")
 		if !hasNotVoted {
@@ -142,15 +144,15 @@ func (node *RaftNode) handleRequestVote(cmd requestVoteCmd) {
 		}
 		if !candidateTermUpToDate {
 			node.debugLog("Candidate's last log term is %d, but our own is %d",
-				cmd.lastLogTerm,
-				node.messageLog[len(node.messageLog)-1].term,
+				cmd.LastLogTerm,
+				node.messageLog[len(node.messageLog)-1].Term,
 			)
 		}
 		if !candidateIndexUpToDate {
-			node.debugLog("Candidate's last log index is %d, but our log's last index is %d", cmd.lastLogIndex, len(node.messageLog)-1)
+			node.debugLog("Candidate's last log index is %d, but our log's last index is %d", cmd.LastLogIndex, len(node.messageLog)-1)
 		}
 
-		node.replyRequestVote(cmd.candidateId, false)
+		node.replyRequestVote(cmd.CandidateId, false)
 	}
 	return
 }
@@ -158,12 +160,12 @@ func (node *RaftNode) handleRequestVote(cmd requestVoteCmd) {
 func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source string) {
 	node.debugLog("Got appendEntries reply %+v from %s", cmd, source)
 
-	if cmd.term > node.currentTerm {
+	if cmd.Term > node.currentTerm {
 		node.debugLog("Reverting to follower because received message with term %d and our own term is %d",
-			cmd.term,
+			cmd.Term,
 			node.currentTerm,
 		)
-		node.becomeFollower(cmd.term)
+		node.becomeFollower(cmd.Term)
 	}
 
 	// Drop the message if it got delayed from earlier and this node is no longer a leader.
@@ -172,23 +174,23 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 		return
 	}
 
-	if !cmd.success {
+	if !cmd.Success {
 		node.debugLog("Received rejected appendEntries. Resending")
 		node.nextIndex[source] -= 1
 		retryAppendEntry := appendEntriesCmd{
-			term:              node.currentTerm,
-			leaderId:          node.serverId,
-			prevLogIndex:      node.nextIndex[source] - 1,
-			prevLogTerm:       node.messageLog[node.nextIndex[source]-1].term,
-			entries:           node.messageLog[node.nextIndex[source]:],
-			leaderCommitIndex: node.commitIndex,
+			Term:              node.currentTerm,
+			LeaderId:          node.serverId,
+			PrevLogIndex:      node.nextIndex[source] - 1,
+			PrevLogTerm:       node.messageLog[node.nextIndex[source]-1].Term,
+			Entries:           node.messageLog[node.nextIndex[source]:],
+			LeaderCommitIndex: node.commitIndex,
 		}
 		sendMessage(node.serverId, []string{source}, retryAppendEntry, node.MsgTransport.Send)
 		return
 	}
 
-	if node.matchIndex[source] < cmd.originalMessage.prevLogIndex+len(cmd.originalMessage.entries) {
-		node.matchIndex[source] = cmd.originalMessage.prevLogIndex + len(cmd.originalMessage.entries)
+	if node.matchIndex[source] < cmd.OriginalMessage.PrevLogIndex+len(cmd.OriginalMessage.Entries) {
+		node.matchIndex[source] = cmd.OriginalMessage.PrevLogIndex + len(cmd.OriginalMessage.Entries)
 		node.debugLog("Node %s's match index increased to %d", node.matchIndex[source])
 	}
 	node.nextIndex[source] = node.matchIndex[source] + 1
@@ -202,9 +204,9 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 	tentativeCommitIndex := matchedIndices[len(node.peernames)/2]
 	if tentativeCommitIndex > node.commitIndex {
 		node.debugLog("About to commit %d entries", tentativeCommitIndex-node.commitIndex)
-		if node.messageLog[tentativeCommitIndex].term == node.currentTerm {
+		if node.messageLog[tentativeCommitIndex].Term == node.currentTerm {
 			for _, entry := range node.messageLog[node.commitIndex+1 : tentativeCommitIndex+1] {
-				node.CommitChannel <- entry.command
+				node.CommitChannel <- entry.Command
 			}
 			node.commitIndex = tentativeCommitIndex
 		}
@@ -213,21 +215,21 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 }
 func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply, source string) {
 	node.debugLog("Got reply of requestVote: %+v from %s.", cmd, source)
-	if cmd.term > node.currentTerm {
+	if cmd.Term > node.currentTerm {
 		node.debugLog("Reverting to follower because received message with term %d and our own term is %d",
-			cmd.term,
+			cmd.Term,
 			node.currentTerm,
 		)
-		node.becomeFollower(cmd.term)
+		node.becomeFollower(cmd.Term)
 		return
 	}
 
-	if cmd.term < node.currentTerm || !(node.currentRole != leaderCandidate) {
-		node.debugLog("Ignoring reply because term is out of date (%d) or we are no longer a candidate", cmd.term)
+	if cmd.Term < node.currentTerm || !(node.currentRole != leaderCandidate) {
+		node.debugLog("Ignoring reply because term is out of date (%d) or we are no longer a candidate", cmd.Term)
 		return
 	}
 
-	if cmd.voteGranted {
+	if cmd.VoteGranted {
 		node.numVotes += 1
 		node.debugLog("Vote received. Now have %d votes out of %d necessary", node.numVotes, len(node.peernames)/2)
 		if node.numVotes >= len(node.peernames)/2 {
@@ -253,7 +255,7 @@ func (node *RaftNode) becomeLeader() {
 	}
 
 	node.currentLeader = node.serverId
-	node.messageLog = append(node.messageLog, logEntry{term: node.currentTerm, command: []byte{}})
+	node.messageLog = append(node.messageLog, logEntry{Term: node.currentTerm, Command: []byte{}})
 	node.heartBeat()
 }
 
@@ -262,15 +264,15 @@ func (node *RaftNode) becomeLeader() {
 func (node *RaftNode) heartBeat() {
 	for _, hostname := range node.peernames {
 		prevLogIndex := node.nextIndex[hostname] - 1
-		lastLogTerm := node.messageLog[prevLogIndex].term
+		lastLogTerm := node.messageLog[prevLogIndex].Term
 
 		heartBeatCommand := appendEntriesCmd{
-			term:              node.currentTerm,
-			leaderId:          node.serverId,
-			prevLogIndex:      prevLogIndex,
-			prevLogTerm:       lastLogTerm,
-			entries:           node.messageLog[prevLogIndex+1:],
-			leaderCommitIndex: node.commitIndex,
+			Term:              node.currentTerm,
+			LeaderId:          node.serverId,
+			PrevLogIndex:      prevLogIndex,
+			PrevLogTerm:       lastLogTerm,
+			Entries:           node.messageLog[prevLogIndex+1:],
+			LeaderCommitIndex: node.commitIndex,
 		}
 
 		sendMessage(node.serverId, []string{hostname}, heartBeatCommand, node.MsgTransport.Send)
@@ -287,10 +289,10 @@ func (node *RaftNode) beginCandidacy() {
 	node.currentTerm += 1
 
 	reqVoteCmd := requestVoteCmd{
-		term:         node.currentTerm,
-		candidateId:  node.serverId,
-		lastLogIndex: len(node.messageLog) - 1,
-		lastLogTerm:  node.messageLog[len(node.messageLog)-1].term,
+		Term:         node.currentTerm,
+		CandidateId:  node.serverId,
+		LastLogIndex: len(node.messageLog) - 1,
+		LastLogTerm:  node.messageLog[len(node.messageLog)-1].Term,
 	}
 	sendMessage(node.serverId, node.peernames, reqVoteCmd, node.MsgTransport.Send)
 
@@ -301,23 +303,23 @@ func (node *RaftNode) beginCandidacy() {
 
 func (node *RaftNode) handleMessage(message *transporter.Message) {
 	var wrappedCommand commandWrapper
-	json.Unmarshal(message.Command, wrappedCommand)
-	switch wrappedCommand.commandType {
+	json.Unmarshal(message.Command, &wrappedCommand)
+	switch wrappedCommand.CommandType {
 	case appendEntriesType:
 		var cmd appendEntriesCmd
-		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
 		node.handleAppendEntries(cmd, message.Source)
 	case requestVoteType:
 		var cmd requestVoteCmd
-		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
 		node.handleRequestVote(cmd)
 	case appendEntriesReplyType:
 		var cmd appendEntriesReply
-		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
 		node.handleAppendEntriesReply(cmd, message.Source)
 	case requestVoteReplyType:
 		var cmd requestVoteReply
-		json.Unmarshal(wrappedCommand.commandJson, cmd)
+		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
 		node.handleRequestVoteReply(cmd, message.Source)
 	}
 }
@@ -335,22 +337,22 @@ func (node *RaftNode) becomeFollower(term int) {
 
 func (node *RaftNode) replyAppendEntries(origCommand appendEntriesCmd, origSender string, success bool) {
 	reply := appendEntriesReply{
-		originalMessage: origCommand,
-		term:            node.currentTerm,
-		success:         success,
+		OriginalMessage: origCommand,
+		Term:            node.currentTerm,
+		Success:         success,
 	}
 	sendMessage(node.serverId, []string{origSender}, reply, node.MsgTransport.Send)
 }
 
 func (node *RaftNode) replyRequestVote(origSender string, voteGranted bool) {
 	reply := requestVoteReply{
-		term:        node.currentTerm,
-		voteGranted: voteGranted,
+		Term:        node.currentTerm,
+		VoteGranted: voteGranted,
 	}
 
 	sendMessage(node.serverId, []string{origSender}, reply, node.MsgTransport.Send)
 }
 
 func (node *RaftNode) debugLog(format string, args ...interface{}) {
-	node.logger.Debug("Node %s: "+format, node.serverId, args...)
+	node.logger.Debug("Node %s: "+format, append([]interface{}{node.serverId}, args...)...)
 }
