@@ -32,13 +32,13 @@ func makeIsolatedNode(clusterSize int) (*RaftNode, chan *transporter.Message, ch
 // Sets up the go-logging stuff
 func loggingSetup(level logging.Level) {
 	backend := logging.NewLogBackend(os.Stderr, "", 0)
-	leveledBackend := logging.AddModuleLevel(backend)
-	leveledBackend.SetLevel(level, "raft_core")
 	format := logging.MustStringFormatter(
 		"%{color}%{time:15:04:05.000} %{shortfunc} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}",
 	)
-	formattedBackend := logging.NewBackendFormatter(leveledBackend, format)
-	logging.SetBackend(formattedBackend)
+	formattedBackend := logging.NewBackendFormatter(backend, format)
+	leveledBackend := logging.AddModuleLevel(formattedBackend)
+	leveledBackend.SetLevel(level, "raft_core")
+	logging.SetBackend(leveledBackend)
 }
 
 func unwrap(message *transporter.Message) (cmdType raftCommandType, command interface{}) {
