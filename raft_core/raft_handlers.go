@@ -224,15 +224,20 @@ func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply, source string
 		return
 	}
 
-	if cmd.Term < node.currentTerm || !(node.currentRole != leaderCandidate) {
-		node.debugLog("Ignoring reply because term is out of date (%d) or we are no longer a candidate", cmd.Term)
+	if cmd.Term < node.currentTerm {
+		node.debugLog("Ignoring reply because term is out of date (%d)", cmd.Term)
+		return
+	}
+
+	if cmd.Term < node.currentTerm || node.currentRole != leaderCandidate {
+		node.debugLog("Ignoring reply because we are no longer a candidate")
 		return
 	}
 
 	if cmd.VoteGranted {
 		node.numVotes += 1
-		node.debugLog("Vote received. Now have %d votes out of %d necessary", node.numVotes, len(node.peernames)/2)
-		if node.numVotes >= len(node.peernames)/2 {
+		node.debugLog("Vote received. Now have %d votes out of %d necessary", node.numVotes, len(node.peernames)/2+1)
+		if node.numVotes > len(node.peernames)/2 {
 			node.debugLog("Got enough votes. Becoming leader at term %d", node.currentTerm)
 			node.becomeLeader()
 		}

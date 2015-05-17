@@ -6,6 +6,7 @@ import (
 	"github.com/op/go-logging"
 	"os"
 	"testing"
+	"time"
 )
 
 // Makes an isolated Raft node (i.e. one that doesn't time out and has no real peers)
@@ -18,11 +19,11 @@ func makeIsolatedNode(clusterSize int) (*RaftNode, chan *transporter.Message, ch
 		peerNames[i] = "host" + string(i+1)
 	}
 	peerNames[clusterSize-1] = "self"
-	sendChan := make(chan *transporter.Message)
-	recvChan := make(chan *transporter.Message)
+	sendChan := make(chan *transporter.Message, 10)
+	recvChan := make(chan *transporter.Message, 10)
 	transporter := transporter.Transporter{sendChan, recvChan}
 
-	commitChan := make(chan []byte)
+	commitChan := make(chan []byte, 10)
 	node := MakeRaftNode("self", peerNames, transporter, commitChan)
 	node.noTimeout = true
 
@@ -87,4 +88,33 @@ func TestAppendEntriesRejection(t *testing.T) {
 	if reply.Success {
 		t.Error("Got success. Expected failure")
 	}
+}
+
+// Tests the ability of a node to become a leader after an acceptable number of granted votes
+func TestLeaderAscension(t *testing.T) {
+	loggingSetup(logging.DEBUG)
+	newNode, _, recv, _ := makeIsolatedNode(5)
+	newNode.currentTerm = 0
+	go newNode.run()
+	newNode.beginCandidacy()
+
+	grantedVotecmd := requestVoteReply{
+		Term:        1,
+		VoteGranted: true,
+	}
+	deniedVotecmd := requestVoteReply{
+		Term:        1,
+		VoteGranted: false,
+	}
+	sendMessage("host1", []string{"self"}, grantedVotecmd, recv)
+	sendMessage("host2", []string{"self"}, grantedVotecmd, recv)
+	sendMessage("host3", []string{"self"}, grantedVotecmd, recv)
+	sendMessage("host4", []string{"self"}, deniedVotecmd, recv)
+
+	time.Sleep(50 * time.Microsecond)
+
+	if newNode.currentRole != clusterLeader {
+		t.Error("Failed to become leader.")
+	}
+
 }
