@@ -118,3 +118,13 @@ func TestLeaderAscension(t *testing.T) {
 	}
 
 }
+
+// Test ability to commit entries after sufficient number of appendEntryReplies
+func TestCommittingEntries(t *testing.T) {
+	loggingSetup(logging.DEBUG)
+	newNode, _, recv, _ := makeIsolatedNode(5)
+	newNode.currentTerm = 0
+	go newNode.run()
+	newNode.becomeLeader()
+
+}

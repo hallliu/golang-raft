@@ -326,6 +326,10 @@ func (node *RaftNode) handleMessage(message *transporter.Message) {
 		var cmd requestVoteReply
 		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
 		node.handleRequestVoteReply(cmd, message.Source)
+	case clientCommandType:
+		var cmd clientCommand
+		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
+		node.handleClientCommand(cmd)
 	}
 }
 
