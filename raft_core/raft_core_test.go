@@ -2,6 +2,7 @@ package raft_core
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/hallliu/golang-raft/transporter"
 	"github.com/op/go-logging"
 	"os"
@@ -28,6 +29,16 @@ func makeIsolatedNode(clusterSize int) (*RaftNode, chan *transporter.Message, ch
 	node.noTimeout = true
 
 	return node, sendChan, recvChan, commitChan
+}
+
+func drainChan(c chan *transporter.Message) {
+	for {
+		select {
+		case <-c:
+		default:
+			return
+		}
+	}
 }
 
 // Sets up the go-logging stuff
@@ -60,6 +71,10 @@ func unwrap(message *transporter.Message) (cmdType raftCommandType, command inte
 		return wrappedCommand.CommandType, cmd
 	case requestVoteReplyType:
 		var cmd requestVoteReply
+		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
+		return wrappedCommand.CommandType, cmd
+	case clientCommandReplyType:
+		var cmd clientCommandReply
 		json.Unmarshal(wrappedCommand.CommandJson, &cmd)
 		return wrappedCommand.CommandType, cmd
 	default:
@@ -122,9 +137,48 @@ func TestLeaderAscension(t *testing.T) {
 // Test ability to commit entries after sufficient number of appendEntryReplies
 func TestCommittingEntries(t *testing.T) {
 	loggingSetup(logging.DEBUG)
-	newNode, _, recv, _ := makeIsolatedNode(5)
+	newNode, send, recv, commit := makeIsolatedNode(5)
 	newNode.currentTerm = 0
 	go newNode.run()
 	newNode.becomeLeader()
+	sendMessage(transporter.CLIENT, []string{"self"}, clientCommand{
+		ClientCommand: []byte("some command json goes here"),
+		CommandId:     3,
+	}, recv)
+	time.Sleep(50 * time.Millisecond)
+	drainChan(send)
+	newNode.heartBeat()
+	for i := 0; i < 4; i++ {
+		select {
+		case msg := <-send:
+			ct, msg1 := unwrap(msg)
+			if ct != appendEntriesType {
+				t.Error("Node is sending weird shit after a heartbeat")
+			}
+			sendMessage(msg.Destination, []string{"self"}, appendEntriesReply{
+				OriginalMessage: msg1.(appendEntriesCmd),
+				Term:            0,
+				Success:         true,
+			}, recv)
+		default:
+			t.Error("Not enough appendEntries sent out")
+		}
+	}
+	replyType, reply := unwrap(<-send)
+	if replyType != clientCommandReplyType {
+		t.Error("Didn't receive reply type")
+	}
+	if reply.(clientCommandReply).CommandId != 3 {
+		t.Error("Wrong command id received: %d", reply.(clientCommandReply).CommandId)
+	}
+	select {
+	case s := <-commit:
+		fmt.Println("%+v\n", s)
+		if string(s) != "some command json goes here" {
+			t.Error("Committed message is corrupted: %s", string(s))
 
+		}
+	default:
+		t.Error("No commit received")
+	}
 }

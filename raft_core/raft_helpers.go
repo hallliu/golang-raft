@@ -29,6 +29,10 @@ func sendMessage(source string, destinations []string, command interface{}, chan
 		cmdType = appendEntriesReplyType
 	case requestVoteReply:
 		cmdType = requestVoteReplyType
+	case clientCommand:
+		cmdType = clientCommandType
+	case clientCommandReply:
+		cmdType = clientCommandReplyType
 	default:
 		panic("Invalid command type")
 	}

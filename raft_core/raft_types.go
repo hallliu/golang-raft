@@ -37,6 +37,7 @@ const (
 	appendEntriesReplyType
 	requestVoteReplyType
 	clientCommandType
+	clientCommandReplyType
 )
 
 type commandWrapper struct {
@@ -73,13 +74,20 @@ type requestVoteReply struct {
 }
 
 type clientCommand struct {
+	CommandId     int
 	ClientCommand []byte
+}
+
+type clientCommandReply struct {
+	CommandId int
+	Success   bool
 }
 
 // The data that makes up the state of a single Raft node
 type logEntry struct {
-	Term    int
-	Command []byte
+	Term      int
+	CommandId int
+	Command   []byte
 }
 
 type RaftNode struct {

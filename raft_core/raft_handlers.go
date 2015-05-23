@@ -206,13 +206,23 @@ func (node *RaftNode) handleAppendEntriesReply(cmd appendEntriesReply, source st
 		node.debugLog("About to commit %d entries", tentativeCommitIndex-node.commitIndex)
 		if node.messageLog[tentativeCommitIndex].Term == node.currentTerm {
 			for _, entry := range node.messageLog[node.commitIndex+1 : tentativeCommitIndex+1] {
+				if entry.CommandId == -1 {
+					continue
+				}
+				node.debugLog("Committing ID %d: %+v\n", entry.CommandId, entry.Command)
 				node.CommitChannel <- entry.Command
+				successMessage := clientCommandReply{
+					CommandId: entry.CommandId,
+					Success:   true,
+				}
+				sendMessage(node.serverId, []string{transporter.CLIENT}, successMessage, node.MsgTransport.Send)
 			}
 			node.commitIndex = tentativeCommitIndex
 		}
 	}
 	return
 }
+
 func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply, source string) {
 	node.debugLog("Got reply of requestVote: %+v from %s.", cmd, source)
 	if cmd.Term > node.currentTerm {
@@ -245,6 +255,26 @@ func (node *RaftNode) handleRequestVoteReply(cmd requestVoteReply, source string
 	return
 }
 
+func (node *RaftNode) handleClientCommand(cmd clientCommand) {
+	node.debugLog("Received command from client with ID %d: %+v", cmd.CommandId, cmd.ClientCommand)
+	if !(node.currentRole == clusterLeader) {
+		node.debugLog("We are not leader. Rejecting message")
+		rejection := clientCommandReply{
+			CommandId: cmd.CommandId,
+			Success:   false,
+		}
+
+		sendMessage(node.serverId, []string{transporter.CLIENT}, rejection, node.MsgTransport.Send)
+		return
+	}
+	node.messageLog = append(node.messageLog, logEntry{
+		Term:      node.currentTerm,
+		Command:   cmd.ClientCommand,
+		CommandId: cmd.CommandId,
+	})
+	node.debugLog("Appended new command to own log: %s", string(node.messageLog[len(node.messageLog)-1].Command))
+}
+
 func (node *RaftNode) becomeLeader() {
 	node.currentTimeout = nil
 	node.currentRole = clusterLeader
@@ -260,7 +290,7 @@ func (node *RaftNode) becomeLeader() {
 	}
 
 	node.currentLeader = node.serverId
-	node.messageLog = append(node.messageLog, logEntry{Term: node.currentTerm, Command: []byte{}})
+	node.messageLog = append(node.messageLog, logEntry{Term: node.currentTerm, Command: []byte{}, CommandId: -1})
 	node.heartBeat()
 }
 

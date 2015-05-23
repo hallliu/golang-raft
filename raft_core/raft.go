@@ -20,7 +20,7 @@ func MakeRaftNode(hostname string, hostnames []string, ownTransport transporter.
 		peernames:     peerNames,
 		serverId:      hostname,
 		currentRole:   clusterFollower,
-		messageLog:    []logEntry{logEntry{-1, []byte{}}},
+		messageLog:    []logEntry{logEntry{-1, -1, []byte{65, 65, 65}}},
 		logger:        logging.MustGetLogger("raft_core"),
 	}
 	return

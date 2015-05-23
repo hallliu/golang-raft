@@ -2,6 +2,8 @@
 
 package transporter
 
+const CLIENT string = "__client__"
+
 type Message struct {
 	Destination string
 	Source      string
